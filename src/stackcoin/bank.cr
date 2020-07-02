@@ -4,10 +4,14 @@ require "./result.cr"
 class StackCoin::Bank
   class Result < StackCoin::Result
     class TransferSuccess < Success
+      property amount : Int32
+      property from_id : UInt64
       property from_bal : Int32
+      property to_id : UInt64
       property to_bal : Int32
 
-      def initialize(@message, @from_bal, @to_bal)
+      def initialize(message, @amount, @from_id, @from_bal, @to_id, @to_bal)
+        super message
       end
     end
 
@@ -35,7 +39,7 @@ class StackCoin::Bank
 
   @@dole_amount : Int32 = 10
 
-  def initialize(@db : DB::Database, @banned : Banned)
+  def initialize(@db : DB::Database, @notification : StackCoin::Notification, @banned : Banned)
   end
 
   def db
@@ -126,6 +130,7 @@ class StackCoin::Bank
       return Result::BannedUser.new "Banned user mentioned in transaction"
     end
 
+    bot_user_id = nil
     from_balance, to_balance = 0, 0
     @db.transaction do |tx|
       cnn = tx.connection
@@ -149,6 +154,8 @@ class StackCoin::Bank
       to_balance = to_balance + amount
       self.deposit cnn, to_id, amount
 
+      bot_user_id = cnn.query_one? "SELECT * FROM token WHERE user_id = ?", to_id.to_s, as: String
+
       args = [] of DB::Any
       args << from_id.to_s
       args << from_balance
@@ -163,6 +170,12 @@ class StackCoin::Bank
       )", args: args
     end
 
-    Result::TransferSuccess.new "Transfer sucessful", from_balance, to_balance
+    result = Result::TransferSuccess.new "Transfer sucessful", amount, from_id, from_balance, to_id, to_balance
+
+    if bot_user_id.is_a? String
+      @notification.send bot_user_id.to_u64, result
+    end
+
+    result
   end
 end
