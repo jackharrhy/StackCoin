@@ -1,7 +1,8 @@
 class StackCoin::Bot
   class Bal < Command
     def initialize(context : Context)
-      @trigger = "bal"
+      @trigger = "balance"
+      @aliases = ["bal"]
       @usage = "?<@user>"
       @desc = "See the STK of yourself, or another user"
       super(context)

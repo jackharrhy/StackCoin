@@ -1,0 +1,33 @@
+<div class="pagination">
+    <%- if has_previous -%>
+    <a href="<%= pagination_base %>?<%= pagination_params_back(limit, offset) %>">
+        <div class="box">
+            <p>&lt;</p>
+        </div>
+    </a>
+    <%- else -%>
+    <div></div>
+    <%- end -%>
+
+    <div class="count">
+        <div>
+            <p>Page <%= (offset // limit + 1) %></p>
+        </div>
+    </div>
+
+    <%- if has_next -%>
+    <a href="<%= pagination_base %>?<%= pagination_params_next(limit, offset) %>">
+        <div class="box">
+            <p>&gt;</p>
+        </div>
+    </a>
+    <%- else -%>
+    <div></div>
+    <%- end -%>
+</div>
+
+<%- if is_empty %>
+<div class="center italic half-opacity">
+  <p>*empty*</p>
+</div>
+<%- end -%>

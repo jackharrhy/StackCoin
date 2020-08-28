@@ -28,7 +28,11 @@ class StackCoin::Statistics < StackCoin::Bank
     end
 
     class Report
+      include JSON::Serializable
+
       class Transaction
+        include JSON::Serializable
+        getter id : Int64
         getter from_id : UInt64
         getter from_bal : Int32
         getter to_id : UInt64
@@ -36,24 +40,36 @@ class StackCoin::Statistics < StackCoin::Bank
         getter amount : Int32
         getter time : Time
 
-        def initialize(from_id, @from_bal, to_id, @to_bal, @amount, time)
+        def initialize(@id, from_id, @from_bal, to_id, @to_bal, @amount, time)
           @from_id = from_id.to_u64
           @to_id = to_id.to_u64
           @time = Database.parse_time(time)
         end
       end
 
-      getter date : Array(String)
-      getter from_id : Array(UInt64)
-      getter to_id : Array(UInt64)
+      class Filters
+        include JSON::Serializable
+        getter dates : Array(String)
+        getter from_ids : Array(UInt64)
+        getter to_ids : Array(UInt64)
+
+        def initialize(@dates, @from_ids, @to_ids)
+        end
+      end
+
+      getter filters : Filters
       getter results : Array(Transaction)
 
-      def initialize(@date, @from_id, @to_id, @results)
+      def initialize(@filters, @results)
       end
     end
   end
 
-  private def handle_balance_result_set(query, args)
+  def self.get
+    @@instance.not_nil!.as(Statistics)
+  end
+
+  private def handle_balance_result_set(query, args = nil)
     balances = {} of UInt64 => Int32
     @db.query(query, args: args) do |rs|
       rs.each do
@@ -64,15 +80,9 @@ class StackCoin::Statistics < StackCoin::Bank
     balances
   end
 
-  def all_balances
-    self.handle_balance_result_set(<<-SQL, nil)
-      SELECT user_id, bal FROM balance
-      SQL
-  end
-
-  def leaderboard(limit = 5)
-    self.handle_balance_result_set(<<-SQL, [limit])
-      SELECT user_id, bal FROM balance ORDER BY bal DESC LIMIT ?
+  def all_balances(limit, offset)
+    self.handle_balance_result_set(<<-SQL, [limit, offset])
+      SELECT user_id, bal FROM balance ORDER BY bal DESC LIMIT ? OFFSET ?
       SQL
   end
 
@@ -120,9 +130,7 @@ class StackCoin::Statistics < StackCoin::Bank
     stdout = process.output.gets_to_end
     stderr = process.error.gets_to_end
 
-    if stderr != ""
-      raise stderr
-    end
+    raise stderr if stderr != ""
 
     Result::Graph::Success.new(File.open(image_filename))
   end
@@ -155,7 +163,16 @@ class StackCoin::Statistics < StackCoin::Bank
     end
   end
 
-  def ledger(dates, from_ids, to_ids, limit = 5)
+  def transaction(id)
+    ledger_query = <<-SQL
+      SELECT id, from_id, from_bal, to_id, to_bal, amount, time FROM ledger WHERE id = ?
+      SQL
+
+    results = @db.query_one(ledger_query, args: [id.to_s], as: {Int64, String, Int32, String, Int32, Int32, String})
+    Result::Report::Transaction.new(*results)
+  end
+
+  def ledger(limit = 5, offset = 0, dates = [] of String, from_ids = [] of UInt64, to_ids = [] of UInt64)
     Log.debug { "Ledger arguments: #{dates}, #{from_ids}, #{to_ids}, #{limit}" }
 
     args = [] of DB::Any
@@ -186,21 +203,25 @@ class StackCoin::Statistics < StackCoin::Bank
     end
 
     ledger_query = <<-SQL
-      SELECT from_id, from_bal, to_id, to_bal, amount, time
-      FROM ledger #{conditions_flat} ORDER BY time DESC LIMIT ?
+      SELECT
+        id, from_id, from_bal, to_id, to_bal, amount, time
+      FROM ledger #{conditions_flat}
+        ORDER BY time DESC LIMIT ? OFFSET ?
       SQL
 
     args << limit
+    args << offset
     Log.debug { "Ledger query: #{ledger_query} - #{args}" }
 
     results = [] of Result::Report::Transaction
 
     @db.query(ledger_query, args: args) do |rs|
       rs.each do
-        results << Result::Report::Transaction.new(*rs.read(String, Int32, String, Int32, Int32, String))
+        results << Result::Report::Transaction.new(*rs.read(Int64, String, Int32, String, Int32, Int32, String))
       end
     end
 
-    Result::Report.new(dates, from_ids, to_ids, results)
+    filters = Result::Report::Filters.new(dates, from_ids, to_ids)
+    Result::Report.new(filters, results)
   end
 end
